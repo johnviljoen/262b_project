@@ -64,7 +64,7 @@ def nm_dpc():
     )
 
     # Train model with prediction horizon of 2
-    cl_system.nsteps = 2
+    cl_system.nsteps = 10
     best_model = trainer.train()
 
     # Test best model on a system rollout

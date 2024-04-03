@@ -1,9 +1,8 @@
-"""this one will be the first attempt to remove the whole neuromancer dependency successfully"""
+"""this one will be the first attempt to remove the whole neuromancer dependency successfully
+result: it actually works! great success!"""
 
 import torch
 import torch.nn as nn
-import numpy as np
-from copy import deepcopy
 torch.manual_seed(1)
 from neuromancer.dataset import DictDataset
 
@@ -106,13 +105,12 @@ def cost(x, u):
     # batch cost, dotted across final dimension and summed across first
     x_loss = torch.einsum('ijk,ilk->jl', x, x)
     u_loss = torch.einsum('ijk,ilk->jl', u, u)
-    return 0.0001 * u_loss + 10.0 * x_loss
+    return (0.0001 * u_loss + 10.0 * x_loss)/x.shape[0]
 
 policy = MLP(nx, nu)
 dynamics = lambda x, u: x @ A.T + u @ B.T
 
 policy.train()
-
 
 
 # Example usage
