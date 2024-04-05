@@ -7,7 +7,7 @@ from neuromancer.loss import PenaltyLoss
 from neuromancer.problem import Problem
 from neuromancer.trainer import Trainer
 from neuromancer.plot import pltCL, pltPhase
-torch.manual_seed(0)
+torch.manual_seed(2)
 
 
 def nm_dpc():
@@ -49,7 +49,9 @@ def nm_dpc():
     # problem.show()
 
     # Solve the optimization problem
-    optimizer = torch.optim.AdamW(policy.parameters(), lr=0.001)
+    # optimizer = torch.optim.Adam(policy.parameters(), lr=0.01, betas=(0.9, 0.999),
+    #                              eps=1e-8, weight_decay=0)# torch.optim.AdamW(policy.parameters(), lr=0.001)
+    optimizer = torch.optim.SGD(policy.parameters(), lr=0.001)
     trainer = Trainer(
         problem,
         train_loader,
@@ -64,7 +66,7 @@ def nm_dpc():
     )
 
     # Train model with prediction horizon of 2
-    cl_system.nsteps = 10
+    cl_system.nsteps = 1
     best_model = trainer.train()
 
     # Test best model on a system rollout

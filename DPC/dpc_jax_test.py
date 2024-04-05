@@ -54,6 +54,12 @@ def dynamics(state, action):
     return state @ A.T + action @ B.T
 
 
+# implement SGD update
+@jit
+def update(mlp_params, inputs, targets, lr=0.01):
+    loss, grads = value_and_grad(vmap(cost))(mlp_params, inputs, targets)
+    return loss, jax.tree_map(lambda p, g: p - lr*g, mlp_params, grads)
+
 # reference adagrad implementation with constant step size:
 # https://jax.readthedocs.io/en/latest/_modules/jax/example_libraries/optimizers.html#adagrad
 def adagrad(step_size, momentum=0.9):
@@ -89,7 +95,7 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(seed)
     nx = 2
     nu = 1
-    mlp_state = init_mlp([nx, 20, 20, 20, nu], key)
+    mlp_state = init_mlp([nx, 20, 20, 20, 20, nu], key)
 
     # tests
     inp = np.random.randn(2)
@@ -108,12 +114,9 @@ if __name__ == "__main__":
 
     horizon = 2
     num_epochs = 400
-    lr = 1e-3
+    lr = 1e-2
     # opt_init, opt_update, get_params = adagrad(lr)
     # opt_state = opt_init(mlp_state)
-
-    # def update(mlp_state, state):
-    #    grads = grad(batched_cost)(mlp_state, state)
 
     for epoch in range(num_epochs):
         for initial_condition in train_data: # (state.shape = 3333x1x2)
@@ -121,10 +124,8 @@ if __name__ == "__main__":
             # for timestep in range(horizon):
             action = batched_MLP_predict(mlp_state, state)
             next_state = dynamics(state, action)
-            # grads = grad(batched_cost)(mlp_state, state)
-            loss, grads = value_and_grad(batched_cost)(mlp_state, state)
+            loss, grads = jit(value_and_grad(batched_cost))(mlp_state, state)
             grads = clip_grad_norm(grads, max_norm=100.0)
-            print(grads)
             # loss, grads = jit(value_and_grad(batched_cost))(get_params(opt_state))
             # opt_state = opt_update(epoch, grads, opt_state)
             mlp_state = jax.tree_map(lambda p, g: p - lr*g, mlp_state, grads)
