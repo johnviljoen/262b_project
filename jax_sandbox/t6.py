@@ -3,10 +3,10 @@ This script will build on t5.py by including the MPC solution using cyipopt
 """
 
 import functools
-import numpy as np
 import jax
-import jax.numpy as jnp
 import cyipopt
+import numpy as np
+import jax.numpy as jnp
 
 seed = 0
 parent_key = jax.random.PRNGKey(seed)
