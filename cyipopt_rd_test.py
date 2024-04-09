@@ -6,15 +6,15 @@ and IPOPTs success.
 import jax.numpy as jnp
 from jax import grad, jacfwd, value_and_grad, jacrev, jit
 from cyipopt import minimize_ipopt
+import dynamics
 
-def f(x, u):
-    # A = jnp.array([[1.0, 1.0], [0.0, 1.0]])
-    # B = jnp.array([[0.0], [1.0]])
-    # x_next = A @ x + B @ u
-    x_1_kp1 = x[0] + x[0]**2 * x[1]
-    x_2_kp1 = x[1] + u
-    x_next = jnp.hstack([x_1_kp1, x_2_kp1])
-    return x_next
+f = dynamics.get("L_SIMO_RD1")
+
+# def f(x, u):
+#     x_1_kp1 = x[0] + x[0]**2 * x[1]
+#     x_2_kp1 = x[1] + u
+#     x_next = jnp.hstack([x_1_kp1, x_2_kp1])
+#     return x_next
 
 def l(z, nx=2, nu=1, N=3, Q=1.0, R=1.0):
     x = z[:N*nx].reshape(N, nx)
@@ -27,16 +27,16 @@ def l(z, nx=2, nu=1, N=3, Q=1.0, R=1.0):
 def h(z, nx=2, nu=1, N=3, x0=jnp.array([1., 1.])):
     x = z[:N*nx].reshape(N, nx)
     u = z[N*nx:].reshape(N-1, nu)
-    
+
     cl = []
     # Enforce initial condition
     cl.append(x[0] - x0)
-    
+
     # Enforce system dynamics as equality constraints
     for k in range(N-1):
         x_next = f(x[k], u[k])
         cl.append(x[k+1] - x_next)
-    
+
     return jnp.concatenate(cl).flatten()
 
 def g(z, nx=2, nu=1, N=3):
