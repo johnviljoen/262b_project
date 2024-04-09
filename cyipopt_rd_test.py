@@ -8,13 +8,7 @@ from jax import grad, jacfwd, value_and_grad, jacrev, jit
 from cyipopt import minimize_ipopt
 import dynamics
 
-f = dynamics.get("L_SIMO_RD1")
-
-# def f(x, u):
-#     x_1_kp1 = x[0] + x[0]**2 * x[1]
-#     x_2_kp1 = x[1] + u
-#     x_next = jnp.hstack([x_1_kp1, x_2_kp1])
-#     return x_next
+f = dynamics.get("NL_SIMO_PVRD")
 
 def l(z, nx=2, nu=1, N=3, Q=1.0, R=1.0):
     x = z[:N*nx].reshape(N, nx)
