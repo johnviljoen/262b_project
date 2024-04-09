@@ -79,15 +79,30 @@ if __name__ == "__main__":
             loss, opt_s = step(epoch, opt_s, b_s, hzn=hzn)
         print(f"epoch: {epoch}, loss: {loss}")
 
-    hzn = 10
-    for epoch in range(num_epochs):
-        for b_s in train_data:  # shape = (1, 3333, 2)
-            loss, opt_s = step(epoch, opt_s, b_s, hzn=hzn)
-        print(f"epoch: {epoch}, loss: {loss}")
+    # hzn = 10
+    # for epoch in range(num_epochs):
+    #     for b_s in train_data:  # shape = (1, 3333, 2)
+    #         loss, opt_s = step(epoch, opt_s, b_s, hzn=hzn)
+    #     print(f"epoch: {epoch}, loss: {loss}")
 
-    eval_data = 3.0 * np.random.randn(3333, nx)
+    eval_data = 3.0 * np.random.randn(1, nx)
     eval_hzn = 10
     eval_loss = b_cost(pol_s, eval_data, eval_hzn)
 
+    Q = 10.0                # state loss
+    R = 0.0001              # action loss
+    b = b_s.shape[0] * eval_hzn    # number of (s,a) pairs loss is generated over
+    b_a_N, b_s_N = [], []
+    for _ in range(eval_hzn):
+        b_a = pol_inf(pol_s, b_s)
+        b_s_kp1 = f(b_s, b_a)
+        loss += (R * jnp.sum(b_a**2) + Q * jnp.sum(b_s_kp1**2)) / b
+        b_s = b_s_kp1
+        b_a_N.append(b_a); b_s_N.append(b_s)
+    
+    b_a_N, b_s_N = jnp.stack(b_a_N), jnp.stack(b_s_N)
+    (R * jnp.sum(b_a_N**2) + Q * jnp.sum(b_s_N**2)) / b
     print('fin')
+
+    
 

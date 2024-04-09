@@ -4,13 +4,14 @@ and IPOPTs success.
 """
 
 import jax.numpy as jnp
-from jax import grad, jacfwd, value_and_grad, jacrev, jit
+from jax import grad, jacfwd, jacrev, jit
 from cyipopt import minimize_ipopt
 import dynamics
 
-f = dynamics.get("NL_SIMO_PVRD")
+f = dynamics.get("L_SIMO_RD3")
+nx, nu, N = 3, 1, 10
 
-def l(z, nx=2, nu=1, N=3, Q=1.0, R=1.0):
+def l(z, nx=nx, nu=nu, N=N, Q=1.0, R=1.0):
     x = z[:N*nx].reshape(N, nx)
     u = z[N*nx:].reshape(N-1, nu)
     
@@ -18,7 +19,7 @@ def l(z, nx=2, nu=1, N=3, Q=1.0, R=1.0):
     cost = jnp.sum(Q * x**2) + jnp.sum(R * (u**2))
     return cost
 
-def h(z, nx=2, nu=1, N=3, x0=jnp.array([1., 1.])):
+def h(z, nx=nx, nu=nu, N=N, x0=jnp.ones(nx)):
     x = z[:N*nx].reshape(N, nx)
     u = z[N*nx:].reshape(N-1, nu)
 
@@ -33,7 +34,7 @@ def h(z, nx=2, nu=1, N=3, x0=jnp.array([1., 1.])):
 
     return jnp.concatenate(cl).flatten()
 
-def g(z, nx=2, nu=1, N=3):
+def g(z, nx=nx, nu=nu, N=N):
     x = z[:N*nx].reshape(N, nx)
     u = z[N*nx:].reshape(N-1, nu)
 
@@ -48,8 +49,7 @@ def g(z, nx=2, nu=1, N=3):
     # stacking of equality constraints
     return jnp.hstack(cl) 
 
-# Initial guess
-nx, nu, N = 2, 1, 3
+# Initial guess for optimization variables: z
 z_init = jnp.zeros(N*nx + (N-1)*nu)
 
 # jit the functions
@@ -75,12 +75,11 @@ constraints = [
 
 # IPOPT minimize call
 result = minimize_ipopt(fun=obj_jit, x0=z_init, jac=obj_grad, hess=obj_hess, constraints=constraints, tol=1e-6, options={'disp': 5, 'maxiter': 100})
+result = minimize_ipopt(fun=obj_jit, x0=z_init, jac=obj_grad, hess=obj_hess, constraints=constraints, tol=1e-6, options={'disp': 5, 'maxiter': 100})
 
 # Extract solution
 sol_x = result.x[:N*nx].reshape(N, nx)
 sol_u = result.x[N*nx:].reshape(N-1, nu)
-
-result = minimize_ipopt(fun=obj_jit, x0=z_init, jac=obj_grad, hess=obj_hess, constraints=constraints, tol=1e-6, options={'disp': 5, 'maxiter': 100})
 
 print('Optimal state trajectory:', sol_x)
 print('Optimal control inputs:', sol_u)
