@@ -25,7 +25,7 @@ from mpc import MPC, MPC_Vectorized
 f = dynamics.get("L_SIMO_RD3") # 512 loss
 
 @functools.partial(jax.jit, static_argnums=(2,))
-def b_cost(pol_s, b_s, hzn):
+def b_cost_mpc(pol_s, b_s, hzn):
     loss = 0
     Q = 10.0                # state loss
     R = 0.0001              # action loss
@@ -37,6 +37,17 @@ def b_cost(pol_s, b_s, hzn):
         b_s = b_s_kp1
         # if jnp.isnan(loss).any():
         #     print('fin')
+    return loss
+
+def b_cost_imitate(pol_s, b_s, hzn, mpc_vec):
+    loss = 0
+    b = b_s.shape[0] * hzn    # number of (s,a) pairs loss is generated over
+    for _ in range(hzn):
+        b_a = pol_inf(pol_s, b_s)
+        b_mpc_a = mpc_vec(jax.lax.stop_gradient(b_s))
+        b_s_kp1 = f(b_s, b_a)
+        loss += (jnp.sum(b_a**2 - b_mpc_a)) / b
+        b_s = b_s_kp1
     return loss
 
 def cost(pol_s, s, hzn):
@@ -51,9 +62,16 @@ def cost(pol_s, s, hzn):
         s = s_kp1
     return loss
 
-def step(step, opt_s, b_s, hzn=1):
+def step_dpc(step, opt_s, b_s, hzn=1):
     pol_s = opt_s[0]
-    loss, grads = jax.value_and_grad(b_cost)(pol_s, b_s, hzn)
+    loss, grads = jax.value_and_grad(b_cost_mpc)(pol_s, b_s, hzn)
+    grads = clip_grad_norm(grads, max_norm=100.0)
+    opt_s = opt_update(step, grads, opt_s)
+    return loss, opt_s
+
+def step_imitate(step, opt_s, b_s, mpc_vec, hzn=1):
+    pol_s = opt_s[0]
+    loss, grads = jax.value_and_grad(b_cost_imitate)(pol_s, b_s, hzn, mpc_vec)
     grads = clip_grad_norm(grads, max_norm=100.0)
     opt_s = opt_update(step, grads, opt_s)
     return loss, opt_s
@@ -68,13 +86,33 @@ if __name__ == "__main__":
     opt_init, opt_update, get_params = adagrad(lr)
     opt_s = opt_init(pol_s) # opt_s = (pol_s, optimizer_state) i.e. all variables that change, get_params gets pol_s
 
-    train_data = 3.0 * np.random.randn(1, 3333, nx)
-    num_epochs = 400 # 400
+    batch_size = 3333
+    train_data = 3.0 * np.random.randn(1, batch_size, nx)
+    num_epochs_dpc = 400 # 400
+    num_epochs_imitate = 10
     hzn = 4
 
-    for epoch in range(num_epochs):
+    for epoch in range(num_epochs_dpc):
         for b_s in train_data:  # shape = (1, 3333, 2)
-            loss, opt_s = step(epoch, opt_s, b_s, hzn=hzn)
+            loss, opt_s = step_dpc(epoch, opt_s, b_s, hzn=hzn)
+        print(f"epoch: {epoch}, loss: {loss}")
+
+    # refresh nn optimizer parameters
+    pol_s = get_params(opt_s)
+    opt_s = opt_init(pol_s)
+    mpc_vec = MPC_Vectorized(N=hzn, nx=nx, nu=nu, ny=3, f=f, b=train_data.shape[1])
+
+    for epoch in range(num_epochs_imitate):
+        for b_s in train_data:  # shape = (1, 3333, 2)
+            loss, opt_s = step_imitate(epoch, opt_s, b_s, mpc_vec, hzn=hzn)
+        print(f"epoch: {epoch}, loss: {loss}")
+
+    pol_s = get_params(opt_s)
+    opt_s = opt_init(pol_s)
+
+    for epoch in range(num_epochs_dpc):
+        for b_s in train_data:  # shape = (1, 3333, 2)
+            loss, opt_s = step_dpc(epoch, opt_s, b_s, hzn=hzn)
         print(f"epoch: {epoch}, loss: {loss}")
 
     # hzn = 10
@@ -86,7 +124,7 @@ if __name__ == "__main__":
     # eval_data = 3.0 * np.random.randn(1, nx) generated the below:
     eval_data = jnp.array([1.59609801, 1.51405802, 4.63639117])
     eval_hzn = 10
-    eval_loss = b_cost(pol_s, eval_data, eval_hzn)
+    eval_loss = b_cost_mpc(pol_s, eval_data, eval_hzn)
 
     Q = 10.0                # state loss
     R = 0.0001              # action loss
@@ -127,7 +165,7 @@ if __name__ == "__main__":
     # R = 0.0001              # action loss
     b_a_N, b_s_N = [], []
     for _ in range(eval_hzn):
-        b_a = mpc_vec(pol_s, b_s)
+        b_a = mpc_vec(b_s)
         b_s_kp1 = f(b_s, b_a)
         loss += (R * jnp.sum(b_a**2) + Q * jnp.sum(b_s_kp1**2)) / b
         b_s = b_s_kp1
