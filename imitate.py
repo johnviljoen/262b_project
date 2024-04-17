@@ -18,7 +18,7 @@ import jax.numpy as jnp
 from utils.mlp import init_pol, pol_inf
 from utils.opt import adagrad, clip_grad_norm
 import dynamics
-from mpc import MPC
+from mpc import MPC, MPC_Vectorized
 
 # f = dynamics.get("L_SIMO_RD1") # 24 loss
 # f = dynamics.get("L_SIMO_RD2") # 124 loss
@@ -120,6 +120,22 @@ if __name__ == "__main__":
     u_N, x_N = jnp.stack(u_N), jnp.stack(x_N)
     (R * jnp.sum(u_N**2) + Q * jnp.sum(x_N**2)) / hzn
     print(f'mpc loss: {loss}')
+
+    ### MPC Vectorized
+    mpc_vec = MPC_Vectorized(N=hzn, nx=nx, nu=nu, ny=3, f=f, b=train_data.shape[1])
+    # Q = 10.0                # state loss
+    # R = 0.0001              # action loss
+    b_a_N, b_s_N = [], []
+    for _ in range(eval_hzn):
+        b_a = mpc_vec(pol_s, b_s)
+        b_s_kp1 = f(b_s, b_a)
+        loss += (R * jnp.sum(b_a**2) + Q * jnp.sum(b_s_kp1**2)) / b
+        b_s = b_s_kp1
+        b_a_N.append(b_a); b_s_N.append(b_s)
+    
+    b_a_N, b_s_N = jnp.stack(b_a_N), jnp.stack(b_s_N)
+    (R * jnp.sum(b_a_N**2) + Q * jnp.sum(b_s_N**2)) / b
+    print(f'mpc vec loss: {loss}')
 
     print('fin')
 
