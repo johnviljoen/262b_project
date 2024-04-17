@@ -46,7 +46,7 @@ def b_cost_imitate(pol_s, b_s, hzn, mpc_vec):
         b_a = pol_inf(pol_s, b_s)
         b_mpc_a = mpc_vec(jax.lax.stop_gradient(b_s))
         b_s_kp1 = f(b_s, b_a)
-        loss += (jnp.sum(b_a**2 - b_mpc_a)) / b
+        loss += (jnp.sum(b_a**2 - b_mpc_a**2)) / b
         b_s = b_s_kp1
     return loss
 
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     hzn = 4
 
     for epoch in range(num_epochs_dpc):
-        for b_s in train_data:  # shape = (1, 3333, 2)
+        for b_s in np.copy(train_data):  # shape = (1, 3333, 2)
             loss, opt_s = step_dpc(epoch, opt_s, b_s, hzn=hzn)
         print(f"epoch: {epoch}, loss: {loss}")
 
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     mpc_vec = MPC_Vectorized(N=hzn, nx=nx, nu=nu, ny=3, f=f, b=train_data.shape[1])
 
     for epoch in range(num_epochs_imitate):
-        for b_s in train_data:  # shape = (1, 3333, 2)
+        for b_s in np.copy(train_data):  # shape = (1, 3333, 2)
             loss, opt_s = step_imitate(epoch, opt_s, b_s, mpc_vec, hzn=hzn)
         print(f"epoch: {epoch}, loss: {loss}")
 
@@ -111,7 +111,7 @@ if __name__ == "__main__":
     opt_s = opt_init(pol_s)
 
     for epoch in range(num_epochs_dpc):
-        for b_s in train_data:  # shape = (1, 3333, 2)
+        for b_s in np.copy(train_data):  # shape = (1, 3333, 2)
             loss, opt_s = step_dpc(epoch, opt_s, b_s, hzn=hzn)
         print(f"epoch: {epoch}, loss: {loss}")
 
