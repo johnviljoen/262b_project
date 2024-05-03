@@ -4,9 +4,7 @@ This script demonstrates DPCs failure on a system, which IPOPT succeeds on in ip
 whats more is that without the horizon being tiny at 2 the loss will become infinite and 
 training will stall.
 """
-
 import jax
-
 seed = 0
 parent_key = jax.random.PRNGKey(seed)
 
@@ -20,11 +18,28 @@ import jax.numpy as jnp
 
 from utils.mlp import init_pol, pol_inf
 from utils.opt import adagrad, clip_grad_norm
-import dynamics
 
-f = dynamics.get("L_SIMO_RD1") # 24 loss
-# f = dynamics.get("L_SIMO_RD2") # 124 loss
-# f = dynamics.get("L_SIMO_RD3") # 512 loss
+def f(x, u):
+    # A = jnp.array([[1.2, 1.0], [0.0, 1.0]])
+    # B = jnp.array([[1.0], [0.5]])
+    # x_next = x @ A.T + u @ B.T
+    A = jnp.array([
+        [1.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+    B = jnp.array([
+        [0.0, 0.0], 
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0]
+    ])
+    x_next = (x @ A.T + u @ B.T)
+    # x_1_kp1 = x[:,0:1] + x[:,0:1] ** 2 * x[:,1:2]
+    # x_2_kp1 = x[:,1:2] + u[:,0:1]
+    # x_next = jnp.hstack([x_1_kp1, x_2_kp1])
+    return x_next
 
 @functools.partial(jax.jit, static_argnums=(2,))
 def b_cost(pol_s, b_s, hzn):
@@ -62,7 +77,9 @@ def step(step, opt_s, b_s, hzn=1):
 
 if __name__ == "__main__":
 
-    nx, nu = 2, 1
+    import matplotlib.pyplot as plt
+
+    nx, nu = 4, 2
     lr = 1e-2
     layer_sizes = [nx, 20, 20, 20, 20, nu]
     pol_s = init_pol(layer_sizes, parent_key)
@@ -70,24 +87,27 @@ if __name__ == "__main__":
     opt_init, opt_update, get_params = adagrad(lr)
     opt_s = opt_init(pol_s) # opt_s = (pol_s, optimizer_state) i.e. all variables that change, get_params gets pol_s
 
-    train_data = 3.0 * np.random.randn(1, 3333, nx)
+    train_data = 3.0 * np.random.randn(1, 3333, 1, nx)
     num_epochs = 400 # 400
-    hzn = 3
+    hzn = 2
 
     for epoch in range(num_epochs):
-        for b_s in train_data:  # shape = (1, 3333, 2)
+        for initial_condition in train_data:  # shape = (1, 3333, 1, 2)
+            b_s = jnp.squeeze(initial_condition, axis=1)  # shape = (3333, 2)
             loss, opt_s = step(epoch, opt_s, b_s, hzn=hzn)
         print(f"epoch: {epoch}, loss: {loss}")
-
-    hzn = 10
-    for epoch in range(num_epochs):
-        for b_s in train_data:  # shape = (1, 3333, 2)
-            loss, opt_s = step(epoch, opt_s, b_s, hzn=hzn)
-        print(f"epoch: {epoch}, loss: {loss}")
-
-    eval_data = 3.0 * np.random.randn(3333, nx)
-    eval_hzn = 10
-    eval_loss = b_cost(pol_s, eval_data, eval_hzn)
-
-    print('fin')
+    
+    # plot an inferenced trajectory with start end points
+    s = np.array([1,2,3,4.])
+    s_hist, a_hist = [], []
+    pol_s = get_params(opt_s)
+    for i, t in enumerate(range(100)):
+        a = pol_inf(pol_s, s)
+        s = f(s, a)
+        s_hist.append(s); a_hist.append(a)
+    
+    s_hist = np.vstack(s_hist)
+    plt.plot(s_hist[:,0], s_hist[:,1])
+    plt.show()
+    
 

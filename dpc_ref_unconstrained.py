@@ -4,7 +4,7 @@ This script demonstrates DPCs failure on a system, which IPOPT succeeds on in ip
 whats more is that without the horizon being tiny at 2 the loss will become infinite and 
 training will stall.
 """
-
+import jax
 seed = 0
 parent_key = jax.random.PRNGKey(seed)
 
@@ -13,7 +13,6 @@ config.update("jax_enable_x64", False)
 config.update('jax_platform_name', 'cpu')
 
 import functools
-import jax
 import numpy as np
 import jax.numpy as jnp
 
@@ -24,10 +23,42 @@ def f(x, u):
     # A = jnp.array([[1.2, 1.0], [0.0, 1.0]])
     # B = jnp.array([[1.0], [0.5]])
     # x_next = x @ A.T + u @ B.T
-    x_1_kp1 = x[:,0:1] + x[:,0:1] ** 2 * x[:,1:2]
-    x_2_kp1 = x[:,1:2] + u[:,0:1]
-    x_next = jnp.hstack([x_1_kp1, x_2_kp1])
+    A = jnp.array([
+        [1.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+    B = jnp.array([
+        [0.0, 0.0], 
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0]
+    ])
+    x_next = (x @ A.T + u @ B.T)
+    # x_1_kp1 = x[:,0:1] + x[:,0:1] ** 2 * x[:,1:2]
+    # x_2_kp1 = x[:,1:2] + u[:,0:1]
+    # x_next = jnp.hstack([x_1_kp1, x_2_kp1])
     return x_next
+
+def f(s, a, cs=jnp.array([[1.0, 1.0, 0.5]])):
+    # s = {x, y, xd, yd, xc, xcd}; o = {x, y, xd, yd, xc, xcd}
+    nx = 4
+    A = jnp.array([
+        [1.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+    B = jnp.array([
+        [0.0, 0.0], 
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0]
+    ])
+    # s_next = (s[:,:nx] @ A.T + a @ B.T)
+    s_next = (s @ A.T + a @ B.T)
+    return s_next # jnp.hstack([s_next, jnp.vstack([posVel2Cyl(s_next, cs)])])
 
 @functools.partial(jax.jit, static_argnums=(2,))
 def b_cost(pol_s, b_s, hzn):
@@ -43,6 +74,18 @@ def b_cost(pol_s, b_s, hzn):
         # if jnp.isnan(loss).any():
         #     print('fin')
     return loss
+
+# @functools.partial(jax.jit, static_argnums=(3,))
+# def b_cost(pol_s, s, hzn):
+#     loss, Q, R, mu, b = 0, 10.0, 0.0001, 0.0, s.shape[0]
+#     for _ in range(hzn):
+#         a = pol_inf(pol_s, s)
+#         s_next = f(s, a)
+#         J = Q * jnp.sum(s_next[:,:4])**2 + R * jnp.sum(a)**2
+#         # pg = 0.0 # barrier_cost(mu, s, a)
+#         loss += (J)/b
+#         s = s_next
+#     return loss
 
 def cost(pol_s, s, hzn):
     loss = 0
@@ -65,7 +108,9 @@ def step(step, opt_s, b_s, hzn=1):
 
 if __name__ == "__main__":
 
-    nx, nu = 2, 1
+    import matplotlib.pyplot as plt
+
+    nx, nu = 4, 2
     lr = 1e-2
     layer_sizes = [nx, 20, 20, 20, 20, nu]
     pol_s = init_pol(layer_sizes, parent_key)
@@ -82,8 +127,18 @@ if __name__ == "__main__":
             b_s = jnp.squeeze(initial_condition, axis=1)  # shape = (3333, 2)
             loss, opt_s = step(epoch, opt_s, b_s, hzn=hzn)
         print(f"epoch: {epoch}, loss: {loss}")
-
     
-
+    # plot an inferenced trajectory with start end points
+    s = np.array([1,2,3,4.])
+    s_hist, a_hist = [], []
+    pol_s = get_params(opt_s)
+    for i, t in enumerate(range(100)):
+        a = pol_inf(pol_s, s)
+        s = f(s, a)
+        s_hist.append(s); a_hist.append(a)
+    
+    s_hist = np.vstack(s_hist)
+    plt.plot(s_hist[:,0], s_hist[:,1])
+    plt.show()
     
 

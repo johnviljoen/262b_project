@@ -56,7 +56,22 @@ def get(name="L_SIMO_RD1"):
             [0.0],
             [1.0]
         ])
-        return (x @ A.T + u @ B.T)        
+        return (x @ A.T + u @ B.T)
+    
+    def L_MIMO_RD2(x, u):
+        A = jnp.array([
+            [1.0, 1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ])
+        B = jnp.array([
+            [0.0, 0.0], 
+            [1.0, 0.0],
+            [0.0, 0.0],
+            [0.0, 1.0]
+        ])
+        return (x @ A.T + u @ B.T)    
 
     def L_MISO():
         pass

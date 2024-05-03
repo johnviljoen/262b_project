@@ -16,9 +16,9 @@ import numpy as np
 import jax.numpy as jnp
 
 from utils.mlp import init_pol, pol_inf
-from utils.opt import adagrad, clip_grad_norm
+from utils.opt import adagrad, adam, rmsprop, clip_grad_norm
 import dynamics
-from mpc import MPC, MPC_Vectorized
+from mpc_ref import MPC, MPC_Vectorized
 
 # f = dynamics.get("L_SIMO_RD1") # 24 loss
 # f = dynamics.get("L_SIMO_RD2") # 124 loss
@@ -46,7 +46,7 @@ def b_cost_imitate(pol_s, b_s, hzn, mpc_vec):
         b_a = pol_inf(pol_s, b_s)
         b_mpc_a = mpc_vec(jax.lax.stop_gradient(b_s))
         b_s_kp1 = f(b_s, b_a)
-        loss += (jnp.sum(b_a**2 - b_mpc_a**2)) / b
+        loss += jnp.sum((b_a - b_mpc_a)**2) / b
         b_s = b_s_kp1
     return loss
 
@@ -79,17 +79,18 @@ def step_imitate(step, opt_s, b_s, mpc_vec, hzn=1):
 if __name__ == "__main__":
 
     nx, nu = 3, 1
-    lr = 1e-2
+    lr_dpc = 1e-2
+    lr_imitate = 1e-2
     layer_sizes = [nx, 20, 20, 20, 20, nu]
     pol_s = init_pol(layer_sizes, parent_key)
 
-    opt_init, opt_update, get_params = adagrad(lr)
+    opt_init, opt_update, get_params = adam(lr_dpc) # rmsprop(lr) # adam(lr) # adagrad(lr)
     opt_s = opt_init(pol_s) # opt_s = (pol_s, optimizer_state) i.e. all variables that change, get_params gets pol_s
 
     batch_size = 3333
     train_data = 3.0 * np.random.randn(1, batch_size, nx)
     num_epochs_dpc = 400 # 400
-    num_epochs_imitate = 10
+    num_epochs_imitate = 40
     hzn = 4
 
     for epoch in range(num_epochs_dpc):
@@ -99,6 +100,7 @@ if __name__ == "__main__":
 
     # refresh nn optimizer parameters
     pol_s = get_params(opt_s)
+    opt_init, opt_update, get_params = adam(lr_imitate) # rmsprop(lr) # adam(lr) # adagrad(lr)
     opt_s = opt_init(pol_s)
     mpc_vec = MPC_Vectorized(N=hzn, nx=nx, nu=nu, ny=3, f=f, b=train_data.shape[1])
 
@@ -108,6 +110,7 @@ if __name__ == "__main__":
         print(f"epoch: {epoch}, loss: {loss}")
 
     pol_s = get_params(opt_s)
+    opt_init, opt_update, get_params = adam(lr_dpc) # rmsprop(lr) # adam(lr) # adagrad(lr)
     opt_s = opt_init(pol_s)
 
     for epoch in range(num_epochs_dpc):

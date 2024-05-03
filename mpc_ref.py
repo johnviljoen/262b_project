@@ -301,6 +301,8 @@ class MPC:
         # stacking of equality constraints
         return jnp.hstack(cl) 
     
+
+    
 if __name__ == "__main__":
     
     f = dynamics.get("L_SIMO_RD3")
