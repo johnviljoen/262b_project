@@ -23,7 +23,6 @@ def posVel2Cyl(s, cs, eps=1e-10):
 
 def f(s, a, cs=jnp.array([[1.0, 1.0, 0.5]])):
     # s = {x, y, xd, yd, xc, xcd}; o = {x, y, xd, yd, xc, xcd}
-    nx = 4
     A = jnp.array([
         [1.0, 0.0, 1.0, 0.0],
         [0.0, 1.0, 0.0, 1.0],
@@ -36,9 +35,8 @@ def f(s, a, cs=jnp.array([[1.0, 1.0, 0.5]])):
         [1.0, 0.0],
         [0.0, 1.0]
     ])
-    # s_next = (s[:,:nx] @ A.T + a @ B.T)
-    s_next = (s @ A.T + a @ B.T)
-    return s_next # jnp.hstack([s_next, jnp.vstack([posVel2Cyl(s_next, cs)])])
+    s_next = (s[:,:4] @ A.T + a @ B.T)
+    return jnp.hstack([s_next, jnp.vstack([posVel2Cyl(s_next, cs)])])
 
 def g(s, a):
     return - s[:,4] # <= 0
@@ -46,7 +44,7 @@ def g(s, a):
 log10_barrier    = lambda value: -jnp.log10(-value)
 log_barrier      = lambda value: -jnp.log(-value)
 inverse_barrier  = lambda value: 1 / (-value)
-softexp_barrier  = lambda value, alpha=0.05: (jnp.exp(alpha * value) - 1) / alpha + alpha
+softexp_barrier  = lambda value, alpha=0.5: (jnp.exp(alpha * value) - 1) / alpha + alpha
 softlog_barrier  = lambda value, alpha=0.05: -jnp.log(1 + alpha * (-value - alpha)) / alpha
 expshift_barrier = lambda value, shift=1.0: jnp.exp(value + shift)
 
@@ -63,13 +61,13 @@ def barrier_cost(multiplier, s, a, barrier=log_barrier, upper_bound=1.0):
 
 @functools.partial(jax.jit, static_argnums=(3,))
 def cost(pol_s, s, cs, hzn):
-    loss, Q, R, mu, b = 0, 10.0, 0.0001, 0.0, s.shape[0]
+    loss, Q, R, mu, b = 0, 10.0, 0.0001, 1_000_000.0, s.shape[0]
     for _ in range(hzn):
         a = pol_inf(pol_s, s)
         s_next = f(s, a, cs)
-        J = Q * jnp.sum(s_next[:,:4])**2 + R * jnp.sum(a)**2
-        # pg = 0.0 # barrier_cost(mu, s, a)
-        loss += (J)/b
+        J = R * jnp.sum(a**2) + Q * jnp.sum(s_next[:,:4]**2)
+        pg = barrier_cost(mu, s, a)
+        loss += (J + pg) / b
         s = s_next
     return loss
 
@@ -83,22 +81,23 @@ def step(step, opt_s, s, cs, hzn, opt_update, get_params):
 if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle
 
     ns, no, ncs, na = 4, 2, 3, 2            # state, cylinder observation, cylinder state, input sizes
     hzn, nb, nmb, ne = 10, 3333, 1, 600     # horizon, batch, minibatch, epoch sizes
     lr = 1e-3                               # learning rate
 
-    layer_sizes = [ns, 20, 20, 20, 20, na]
+    layer_sizes = [ns + no, 20, 20, 20, 20, na]
     pol_s = init_pol(layer_sizes, parent_key)
 
     opt_init, opt_update, get_params = adam(lr)
     opt_s = opt_init(pol_s)
 
     train_s = 3 * np.random.randn(nb, ns)
-    train_cs = np.array([[0,0,0.]]*nb)# np.random.randn(nb, ncs)
-    # train_s = np.hstack([train_s, posVel2Cyl(train_s, train_cs)])
-    # valid_mask = train_s[:,4] >= 0
-    # train_s, train_cs = train_s[valid_mask], train_cs[valid_mask]
+    train_cs = np.array([[1,1,0.5]]*nb)# np.random.randn(nb, ncs)
+    train_s = np.hstack([train_s, posVel2Cyl(train_s, train_cs)])
+    valid_mask = train_s[:,4] >= 0
+    train_s, train_cs = train_s[valid_mask], train_cs[valid_mask]
 
     best_loss = jnp.inf
     for e in range(ne):
@@ -110,9 +109,13 @@ if __name__ == "__main__":
         print(f"epoch: {e}, loss: {loss}")
 
     # plot an inferenced trajectory with start end points
-    s = np.array([[1,2,3,4.]])
-    cs = np.array([[1,1,0.5]])
-    # s = np.hstack([s, posVel2Cyl(s, cs)])
+    nb = 20
+
+    s = 3 * np.random.randn(nb, ns)
+    cs = np.array([[1,1,0.5]]*nb)# np.random.randn(nb, ncs)
+    s = np.hstack([s, posVel2Cyl(s, cs)])
+    mask = s[:,4] >= 0
+    s, cs = s[mask], cs[mask]
     s_hist, a_hist = [], []
     pol_s = get_params(best_opt_s)
     for i, t in enumerate(range(100)):
@@ -121,7 +124,10 @@ if __name__ == "__main__":
         s_hist.append(s); a_hist.append(a)
     
     s_hist = np.vstack(s_hist)
-    plt.plot(s_hist[:,0], s_hist[:,1])
+    fig, ax = plt.subplots()
+    ax.plot(s_hist[:,0], s_hist[:,1])
+    ax.add_patch(Circle(cs[0,:2],cs[0,2]))
+    ax.set_aspect('equal')
     plt.show()
 
     print('fin')
