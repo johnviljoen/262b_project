@@ -18,7 +18,7 @@ import jax.numpy as jnp
 from utils.mlp import init_pol, pol_inf
 from utils.opt import adagrad, adam, rmsprop, clip_grad_norm
 import dynamics
-from mpc_ref import MPC, MPC_Vectorized
+from mpc import MPC, MPC_Vectorized
 
 # f = dynamics.get("L_SIMO_RD1") # 24 loss
 # f = dynamics.get("L_SIMO_RD2") # 124 loss
