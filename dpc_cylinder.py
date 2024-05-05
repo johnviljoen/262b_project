@@ -93,8 +93,6 @@ if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
     from matplotlib.patches import Circle
-    from utils.jax import reconstruct_pytree
-    from utils.geometry import pca, project_vector, find_coefficients
     from utils.plotting import plot_training_trajectory
 
     ns, no, ncs, na = 4, 2, 3, 2            # state, cylinder observation, cylinder state, input sizes

@@ -4,9 +4,10 @@ import numpy as np
 from utils.geometry import project_vector, find_coefficients, pca
 from utils.jax import reconstruct_pytree    
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, hzn):
-    print('performing PCA analysis plotting')
+    print('performing PCA analysis plotting...')
     components = pca(pol_s_hist.T)
     vec_best_pol_s, _ = jax.tree.flatten(get_params(opt_s))
     vec_best_pol_s = jnp.concatenate([jnp.ravel(leaf) for leaf in vec_best_pol_s])
@@ -25,7 +26,6 @@ def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dty
         losses_traj[i] = cost(projected_vecs_pytree, train_s, train_cs, hzn)
         losses_true_traj[i] = cost(true_vecs_pytree, train_s, train_cs, hzn)
 
-    # Generate 100 points on each axis
     num_points = 100
 
     x_delta = xy[:,0].max() - xy[:,0].min()
@@ -40,51 +40,78 @@ def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dty
 
     x = np.linspace(x_min, x_max, num_points)
     y = np.linspace(y_min, y_max, num_points)
-
-    # Create meshgrid
     X, Y = np.meshgrid(x, y)
 
     losses = np.zeros_like(X)
-    for i in range(num_points):
+    print('gathering losses...')
+    for i in tqdm(range(num_points)):
         for j in range(num_points):
             vec = vec_best_pol_s + X[i,j] * components[:,0] + Y[i,j] * components[:,1]
             pytree = reconstruct_pytree(vec, shapes_and_dtypes, treedef)
             losses[i,j] = cost(pytree, train_s, train_cs, hzn)
     
-    losses = np.clip(losses, a_min=0.0, a_max = 2_000)
+    losses_clipped = np.clip(losses, a_min=0.0, a_max = 2_000)
 
-    # Create a figure and a 3D subplot
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    # Create a figure with two subplots
+    fig = plt.figure(figsize=(16, 6))
+    ax1 = fig.add_subplot(121, projection='3d')
+    ax2 = fig.add_subplot(122)
 
-    # Plot the surface
-    surface = ax.plot_surface(X, Y, np.log(losses), cmap='viridis')
-    # line = ax.plot(xy[:,0], xy[:,1], np.log(losses_traj), color='red')
+    # Plot the 3D surface on the first subplot
+    surface = ax1.plot_surface(X, Y, np.log(losses_clipped), cmap='viridis')
+    # fig.colorbar(surface, ax=ax1, shrink=0.5, aspect=10)
+    ax1.set_xlabel('PC 2')
+    ax1.set_ylabel('PC 1')
+    ax1.set_zlabel('Loss')
 
-    # Add a color bar which maps values to colors
-    fig.colorbar(surface, shrink=0.5, aspect=5)
+    # Plot the 2D contour plot on the second subplot
+    contour = ax2.contourf(X, Y, np.log(losses_clipped), cmap='viridis', levels=50)
+    plt.colorbar(contour, ax=ax2)
+    contour_lines = ax2.contour(X, Y, np.log(losses_clipped), colors='black', linestyles='dashed', linewidths=1)
+    ax2.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.1f')
+    ax2.plot(xy[:,0], xy[:,1], 'r-', label='Optimization Trajectory')
+    ax2.legend()
+    ax2.set_xlabel('PC 2')
+    ax2.set_ylabel('PC 1')
 
-    # Set labels and title
-    ax.set_xlabel('PC 2 axis')
-    ax.set_ylabel('PC 1 axis')
-    ax.set_zlabel('Loss axis')
+    # Save the combined plot to a file
+    plt.savefig('data/combined_nn_optimization.pdf')
 
     # Show the plot
-    plt.savefig('data/nn_optimization_landscape.pdf')
-    # plt.show()
+    plt.show()
 
-    # Create the contour plot
-    plt.figure(figsize=(8, 6))
-    contour = plt.contourf(X, Y, np.log(losses), cmap='viridis', levels=50)
-    plt.colorbar(contour)
-    contour_lines = plt.contour(X, Y, np.log(losses), colors='black', linestyles='dashed', linewidths=1)
-    plt.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.1f')
+    # # Create a figure and a 3D subplot
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
 
-    # Plot the trajectory
-    plt.plot(xy[:,0], xy[:,1], 'r-', label='Optimization Trajectory')
-    # plt.scatter(xy[:,0], xy[:,1], c='red')  # Optionally mark points
-    plt.xlabel('PC 2')
-    plt.ylabel('PC 1')
-    plt.legend()
+    # # Plot the surface
+    # surface = ax.plot_surface(X, Y, np.log(losses), cmap='viridis')
+    # # line = ax.plot(xy[:,0], xy[:,1], np.log(losses_traj), color='red')
 
-    plt.savefig('data/nn_optimization_trajectory.pdf')
+    # # Add a color bar which maps values to colors
+    # fig.colorbar(surface, shrink=0.5, aspect=5)
+
+    # # Set labels and title
+    # ax.set_xlabel('PC 2 axis')
+    # ax.set_ylabel('PC 1 axis')
+    # ax.set_zlabel('Loss axis')
+
+    # # Show the plot
+    # plt.savefig('data/nn_optimization_landscape.pdf')
+    # # plt.show()
+
+    # # Create the contour plot
+    # plt.figure(figsize=(8, 6))
+    # contour = plt.contourf(X, Y, np.log(losses), cmap='viridis', levels=50)
+    # plt.colorbar(contour)
+    # contour_lines = plt.contour(X, Y, np.log(losses), colors='black', linestyles='dashed', linewidths=1)
+    # plt.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.1f')
+
+    # # Plot the trajectory
+    # plt.plot(xy[:,0], xy[:,1], 'r-', label='Optimization Trajectory')
+    # # plt.scatter(xy[:,0], xy[:,1], c='red')  # Optionally mark points
+    # plt.xlabel('PC 2')
+    # plt.ylabel('PC 1')
+    # plt.legend()
+
+    # plt.savefig('data/nn_optimization_trajectory.pdf')
