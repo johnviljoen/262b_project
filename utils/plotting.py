@@ -29,7 +29,7 @@ def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dty
         projected_vecs_pytree = reconstruct_pytree(projected_vecs[i], shapes_and_dtypes, treedef)
         true_vecs_pytree = reconstruct_pytree(pol_s_hist[i], shapes_and_dtypes, treedef)
         losses_traj[i] = cost(projected_vecs_pytree, train_s, train_cs, train_im_s, hzn)
-        losses_true_traj[i] = cost(true_vecs_pytree, train_s, train_cs, train_im_s,hzn)
+        losses_true_traj[i] = cost(true_vecs_pytree, train_s, train_cs, train_im_s, hzn)
 
     num_points = 100
 
@@ -53,7 +53,7 @@ def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dty
         for j in range(num_points):
             vec = vec_best_pol_s + X[i,j] * components[:,0] + Y[i,j] * components[:,1]
             pytree = reconstruct_pytree(vec, shapes_and_dtypes, treedef)
-            losses[i,j] = cost(pytree, train_s, train_cs, hzn)
+            losses[i,j] = cost(pytree, train_s, train_cs, train_im_s, hzn)
     
     losses_clipped = np.clip(losses, a_min=0.0, a_max = 2_000)
 
@@ -93,7 +93,7 @@ def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dty
     # Save the combined plot to a file
     plt.savefig(save_name)
 
-    plt.show()
+    # plt.show()
 
 def plot_nn_contours(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, hzn, save_name='data/combined_nn_optimization.pdf', ne=400):
     print('performing PCA analysis plotting...')

@@ -14,6 +14,7 @@ from tqdm import tqdm
 from utils.mlp import init_pol, pol_inf
 from utils.opt import adagrad, adam, clip_grad_norm
 from mpc_ca import MPCVariableSpaceHorizon, generate_variable_timesteps
+import matplotlib.pyplot as plt
 
 def gen_dataset(nb, cs):
     angles = np.random.normal(loc=1.25 * np.pi, scale=2, size=(nb,))
@@ -73,15 +74,23 @@ softexp_barrier  = lambda value, alpha=0.05: (jnp.exp(alpha * value) - 1) / alph
 softlog_barrier  = lambda value, alpha=0.05: -jnp.log(1 + alpha * (-value - alpha)) / alpha
 expshift_barrier = lambda value, shift=1.0: jnp.exp(value + shift)
 
-def barrier_cost(multiplier, s, a, barrier=log_barrier, upper_bound=1.0):
+# values = np.arange(-1,0,0.01)
+# plt.plot(values, log_barrier(values)*0.5)
+# plt.plot(values, softlog_barrier(values, alpha=1.0))
+
+# plt.show()
+
+# print('fin')
+
+def barrier_cost(mu_pen, mu_bar, s, a, barrier=log_barrier, upper_bound=1.0):
     cvalue = g(s, a)
     penalty_mask = cvalue > 0
     cviolation = jnp.clip(cvalue, a_min=0.0) # could just use penalty mask too
     cbarrier = barrier(cvalue)
     cbarrier = jnp.nan_to_num(cbarrier, nan=0.0, posinf=0.0)
     cbarrier = jnp.clip(cbarrier, a_min=0.0, a_max=upper_bound)
-    penalty_loss = multiplier * jnp.mean(penalty_mask * cviolation)
-    barrier_loss = multiplier * jnp.mean(~penalty_mask * cbarrier)
+    penalty_loss = mu_pen * jnp.mean(penalty_mask * cviolation)
+    barrier_loss = mu_bar * jnp.mean(~penalty_mask * cbarrier)
     return penalty_loss + barrier_loss
 
 @functools.partial(jax.jit, static_argnums=(4,))
@@ -89,25 +98,60 @@ def cost(pol_s, s, cs, im_s, hzn): # mu opt: 50k ish, standard start is 1m
     
     # DPC cost
     loss, Q, R, mu, b = 0, 5.0, 0.1, 1_000_000.0, s.shape[0]
+    mu_pen = 1_000_000
+    mu_bar = 75_000
+    im_mu = 75
     for _ in range(hzn):
         a = pol_inf(pol_s, s)
         s_next = f(s, a, cs)
         J = R * jnp.sum(a**2) + Q * jnp.sum(s_next[:,:4]**2)
-        pg = barrier_cost(mu, s, a)
+        pg = barrier_cost(mu_pen, mu_bar, s, a)
         loss += (J + pg) / b
         s = s_next
 
     # Imitation cost
     im_b = im_s[0].shape[0]
-    loss += 100 * jnp.sum((im_s[1] - pol_inf(pol_s, im_s[0]))**2) / im_b
+    loss += im_mu * jnp.sum((im_s[1] - pol_inf(pol_s, im_s[0]))**2) / im_b
 
+    return loss
+
+@functools.partial(jax.jit, static_argnums=(4,))
+def mpc_cost(pol_s, s, cs, im_s, hzn):
+    # DPC cost
+    loss, Q, R, mu, b = 0, 5.0, 0.1, 1_000_000.0, s.shape[0]
+    mu_pen = 1_000_000
+    mu_bar = 75_000
+    for _ in range(hzn):
+        a = pol_inf(pol_s, s)
+        s_next = f(s, a, cs)
+        J = R * jnp.sum(a**2) + Q * jnp.sum(s_next[:,:4]**2)
+        pg = barrier_cost(mu_pen, mu_bar, s, a)
+        loss += (J + pg) / b
+        s = s_next
+
+    return loss
+
+@functools.partial(jax.jit, static_argnums=(4,))
+def mpc_cost_pure(pol_s, s, cs, im_s, hzn):
+    # DPC cost
+    loss, Q, R, mu, b = 0, 5.0, 0.1, 1_000_000.0, s.shape[0]
+    mu_pen = 1_000_000
+    mu_bar = 0
+    for _ in range(hzn):
+        a = pol_inf(pol_s, s)
+        s_next = f(s, a, cs)
+        J = R * jnp.sum(a**2) + Q * jnp.sum(s_next[:,:4]**2)
+        pg = barrier_cost(mu_pen, mu_bar, s, a)
+        loss += (J + pg) / b
+        s = s_next
     return loss
 
 def step(step, opt_s, s, cs, im_s, hzn, opt_update, get_params):
     pol_s = get_params(opt_s)
-    # test = cost(pol_s, s, cs, hzn)
-    # test2 = jax.grad(cost)(pol_s, s, cs, hzn)
-    loss, grads = jax.value_and_grad(cost)(pol_s, s, cs, im_s, hzn)
+
+    # loss, grads = jax.value_and_grad(cost)(pol_s, s, cs, im_s, hzn)
+    loss, grads = jax.value_and_grad(mpc_cost)(pol_s, s, cs, im_s, hzn)
+
     grads = clip_grad_norm(grads, max_norm=100.0)
     # grads = jnp.nan_to_num(grads, nan=0.0)
     opt_s = opt_update(step, grads, opt_s)
@@ -124,6 +168,7 @@ if __name__ == "__main__":
     lr = 5e-3                               # learning rate
     # nb = 10 # testing
     # ne = 2
+    hzn = 30
     layer_sizes = [ns + no, 20, 20, 20, 20, na]
     pol_s = init_pol(layer_sizes, parent_key)
 
@@ -135,7 +180,8 @@ if __name__ == "__main__":
 
     dts_init = generate_variable_timesteps(Ts=0.1, Tf_hzn=0.1*hzn, N=hzn)
     mpc = MPCVariableSpaceHorizon(N=hzn, Ts_0=0.1, Tf_hzn=0.1*hzn, dts_init=dts_init)
-    train_im_s = gen_dataset_imitation(nb, train_cs, mpc)
+    # train_im_s = gen_dataset_imitation(nb, train_cs, mpc)
+    train_im_s = None
 
     best_loss = jnp.inf
     pol_s_hist = []
@@ -156,7 +202,7 @@ if __name__ == "__main__":
     pol_s_hist = np.vstack(pol_s_hist)
     grads_hist = np.vstack(grads_hist)
 
-    plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, train_im_s, hzn, save_name='data/combined_nn_optimization_imitation_together.pdf')
+    plot_training_trajectory(opt_s, pol_s_hist, mpc_cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, train_im_s, hzn, save_name='data/mpc_alone_1m.pdf')
 
     # reset adam before imitation
     pol_s = get_params(best_opt_s)
@@ -175,11 +221,19 @@ if __name__ == "__main__":
         s_hist.append(s); a_hist.append(a)
     
     s_hist = np.stack(s_hist)
+    a_hist = np.stack(a_hist)
+
     fig, ax = plt.subplots()
     for i in range(nb):
         ax.plot(s_hist[:,i,0], s_hist[:,i,1])
     ax.add_patch(Circle(cs[0,:2], cs[0,2]))
     ax.set_aspect('equal')
-    plt.show()
+    plt.savefig('mpc_alone_1m.pdf')
+    # plt.show()
+
+    np.savez('mpc_alone_1m.npz', s_hist=s_hist, a_hist=a_hist)
+
+    print(f'mpc_cost: {mpc_cost_pure(pol_s, train_s, train_cs, train_im_s, hzn)}')
+    # print(f'mpc_plus_imitation_cost: {cost(pol_s, train_s, train_cs, train_im_s, hzn)}')
 
     print('fin')
