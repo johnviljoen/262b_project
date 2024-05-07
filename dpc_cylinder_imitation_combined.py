@@ -63,23 +63,6 @@ def f(s, a, cs=jnp.array([[-1.0, -1.0, 0.5]]), Ts=0.1):
     s_next = (s[:,:4] @ A.T + a @ B.T)
     return jnp.hstack([s_next, jnp.vstack([posVel2Cyl(s_next, cs)])])
 
-def f_pure(s, a, Ts=0.1):
-    # s = {x, y, xd, yd, xc, xcd}; o = {x, y, xd, yd, xc, xcd}
-    A = jnp.array([
-        [1.0, 0.0, Ts,  0.0],
-        [0.0, 1.0, 0.0, Ts ],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0]
-    ])
-    B = jnp.array([
-        [0.0, 0.0], 
-        [0.0, 0.0],
-        [Ts, 0.0],
-        [0.0, Ts]
-    ])
-    s_next = (s @ A.T + a @ B.T)
-    return s_next
-
 def g(s, a):
     return - s[:,4] # <= 0
 
@@ -101,8 +84,10 @@ def barrier_cost(multiplier, s, a, barrier=log_barrier, upper_bound=1.0):
     barrier_loss = multiplier * jnp.mean(~penalty_mask * cbarrier)
     return penalty_loss + barrier_loss
 
-@functools.partial(jax.jit, static_argnums=(3,))
-def cost(pol_s, s, cs, hzn): # mu opt: 50k ish, standard start is 1m
+@functools.partial(jax.jit, static_argnums=(4,))
+def cost(pol_s, s, cs, im_s, hzn): # mu opt: 50k ish, standard start is 1m
+    
+    # DPC cost
     loss, Q, R, mu, b = 0, 5.0, 0.1, 1_000_000.0, s.shape[0]
     for _ in range(hzn):
         a = pol_inf(pol_s, s)
@@ -111,28 +96,18 @@ def cost(pol_s, s, cs, hzn): # mu opt: 50k ish, standard start is 1m
         pg = barrier_cost(mu, s, a)
         loss += (J + pg) / b
         s = s_next
+
+    # Imitation cost
+    im_b = im_s[0].shape[0]
+    loss += 100 * jnp.sum((im_s[1] - pol_inf(pol_s, im_s[0]))**2) / im_b
+
     return loss
 
-@jax.jit
-def cost_imitation(pol_s, s): # mu opt: 50k ish, standard start is 1m
-    b = s[0].shape[0]
-    return jnp.sum((s[1] - pol_inf(pol_s, s[0]))**2) / b
-
-def step(step, opt_s, s, cs, hzn, opt_update, get_params):
+def step(step, opt_s, s, cs, im_s, hzn, opt_update, get_params):
     pol_s = get_params(opt_s)
     # test = cost(pol_s, s, cs, hzn)
     # test2 = jax.grad(cost)(pol_s, s, cs, hzn)
-    loss, grads = jax.value_and_grad(cost)(pol_s, s, cs, hzn)
-    grads = clip_grad_norm(grads, max_norm=100.0)
-    # grads = jnp.nan_to_num(grads, nan=0.0)
-    opt_s = opt_update(step, grads, opt_s)
-    return loss, opt_s, grads
-
-def step_imitation(step, opt_s, s, cs, hzn, opt_update, get_params, mpc):
-    pol_s = get_params(opt_s)
-    # test = cost(pol_s, s, cs, hzn)
-    # test2 = jax.grad(cost)(pol_s, s, cs, hzn)
-    loss, grads = jax.value_and_grad(cost_imitation)(pol_s, s, cs, hzn, mpc)
+    loss, grads = jax.value_and_grad(cost)(pol_s, s, cs, im_s, hzn)
     grads = clip_grad_norm(grads, max_norm=100.0)
     # grads = jnp.nan_to_num(grads, nan=0.0)
     opt_s = opt_update(step, grads, opt_s)
@@ -158,11 +133,15 @@ if __name__ == "__main__":
     train_cs = np.array([[-1,-1,0.5]]*nb) # np.random.randn(nb, ncs)
     train_s = gen_dataset(nb, train_cs)
 
+    dts_init = generate_variable_timesteps(Ts=0.1, Tf_hzn=0.1*hzn, N=hzn)
+    mpc = MPCVariableSpaceHorizon(N=hzn, Ts_0=0.1, Tf_hzn=0.1*hzn, dts_init=dts_init)
+    train_im_s = gen_dataset_imitation(nb, train_cs, mpc)
+
     best_loss = jnp.inf
     pol_s_hist = []
     grads_hist = []
     for e in range(ne):
-        loss, opt_s, grads = step(e, opt_s, train_s, train_cs, hzn, opt_update, get_params)
+        loss, opt_s, grads = step(e, opt_s, train_s, train_cs, train_im_s, hzn, opt_update, get_params)
         leaves, treedef = jax.tree.flatten(get_params(opt_s))
         shapes_and_dtypes = [(leaf.shape, leaf.dtype) for leaf in leaves]
         pol_s_hist.append(jnp.concatenate([jnp.ravel(leaf) for leaf in leaves]))
@@ -177,63 +156,12 @@ if __name__ == "__main__":
     pol_s_hist = np.vstack(pol_s_hist)
     grads_hist = np.vstack(grads_hist)
 
-    # plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, hzn, save_name='data/combined_nn_optimization.pdf')
+    plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, train_im_s, hzn, save_name='data/combined_nn_optimization_imitation_together.pdf')
 
     # reset adam before imitation
     pol_s = get_params(best_opt_s)
     opt_s = opt_init(pol_s)
 
-    print('performing imitation phase:')
-
-    dts_init = generate_variable_timesteps(Ts=0.1, Tf_hzn=0.1*hzn, N=hzn)
-    mpc = MPCVariableSpaceHorizon(N=hzn, Ts_0=0.1, Tf_hzn=0.1*hzn, dts_init=dts_init)
-    train_imitation_s = gen_dataset_imitation(nb, train_cs, mpc)
-
-    plot_nn_contours(
-        opt_s, 
-        pol_s_hist, 
-        lambda pol_s, s, cs, hzn: cost_imitation(pol_s, s, cs, hzn, mpc), 
-        get_params, 
-        shapes_and_dtypes, 
-        treedef, 
-        train_imitation_s, 
-        train_cs, 
-        hzn, 
-        save_name='data/combined_nn_optimization_imitation.pdf',
-        ne=ne
-    )
-
-    best_loss = jnp.inf
-    pol_s_hist_imitate = []
-    for e in range(ne):
-        loss, opt_s, grads = step_imitation(e, opt_s, train_imitation_s, train_cs, hzn, opt_update, get_params, mpc)
-        leaves, treedef = jax.tree.flatten(get_params(opt_s))
-        shapes_and_dtypes = [(leaf.shape, leaf.dtype) for leaf in leaves]
-        pol_s_hist_imitate.append(jnp.concatenate([jnp.ravel(leaf) for leaf in leaves]))
-        if loss < best_loss:
-            best_opt_s = opt_s
-            best_loss = loss
-            print('new best:')
-        print(f"epoch: {e}, loss: {loss}")
-
-    pol_s_hist_imitate = np.vstack(pol_s_hist_imitate)
-
-    print('fin')
-
-    # n_step = 0
-    # mb_len = int(nb/nmb)
-    # for e in range(ne):
-    #     for mb in range(mb_len):
-    #         mb_s = train_s[mb_len*mb:mb_len*(mb+1)]
-    #         mb_cs = train_cs[mb_len*mb:mb_len*(mb+1)]
-    #         loss, opt_s = step(n_step, opt_s, mb_s, mb_cs, hzn, opt_update, get_params)
-    #     if loss < best_loss:
-    #         best_opt_s = opt_s
-    #         best_loss = loss
-    #         print('new best:')
-    #     print(f"epoch: {e}, loss: {loss}")
-
-    # plot an inferenced trajectory with start end points
     nb = 30
 
     cs = np.array([[-1,-1,0.5]]*nb) # np.random.randn(nb, ncs)
