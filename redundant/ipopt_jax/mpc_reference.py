@@ -114,10 +114,6 @@ class MPC:
         # define start condition
         self.opti.set_value(self.init, state)
 
-        # calculate the adaptive dts
-        # dts = self.adaptive_dts_Tf_hzn(state, reference)
-        # self.opti.set_value(self.dts, self.dts)
-
         # warm starting
         # reference_stack = np.array([np.linspace(state[i], reference[i,-1], self.N) for i in range(self.n)])
         old_x_sol = self.x_sol[:,2:] # ignore old start and first step (this step start)

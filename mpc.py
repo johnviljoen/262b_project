@@ -81,7 +81,9 @@ class MPC_Vectorized_Cylinder:
         # for just an MPC like this.
         z_init = []
         sol_u = []
-        for i, x in tqdm(enumerate(x_b)): # every initial condition in the batch input
+        for i, x in enumerate(x_b): # every initial condition in the batch input
+
+            print(jnp.sqrt((x[:,0] - 1)**2 + (x[:,1] - 1)**2) - 0.5)
 
             h_jit = lambda z: self.h_jit(z, x) 
             h_jac = lambda z: self.h_jac(z, x)
@@ -147,11 +149,13 @@ class MPC_Vectorized_Cylinder:
 
         cl = [] # constraint list
 
+        cl.append(-(jnp.sqrt((x[:,0] - 1)**2 + (x[:,1] - 1)**2) - 0.5))
+
         # random inequalities - can be nonlinear ofc
-        cl.append(x[0] + 25)       # = 0
-        cl.append(x[1] + 25)   # = 0
-        cl.append(u[0] + 25)       # = 0
-        cl.append(u[1] + 25)   # = 0
+        # cl.append(x[0] + 25)   # = 0
+        # cl.append(x[1] + 25)   # = 0
+        # cl.append(u[0] + 25)   # = 0
+        # cl.append(u[1] + 25)   # = 0
 
         # stacking of equality constraints
         return jnp.hstack(cl) 
@@ -383,6 +387,8 @@ class MPC:
         # which passes *args and returns a new constraints list, but I think overcomplicated 
         # for just an MPC like this.
 
+        print(jnp.sqrt((x[0] + 1)**2 + (x[1] + 1)**2) - 0.5)
+
         h_jit = lambda z: self.h_jit(z, x) 
         h_jac = lambda z: self.h_jac(z, x)
         h_hessvp = lambda z, v: jnp.sum(self.h_hess(z, x) * v[:, None, None], axis=0)
@@ -445,22 +451,41 @@ class MPC:
         cl = [] # constraint list
 
         # random inequalities - can be nonlinear ofc
-        cl.append(x[0] + 25)       # = 0
-        cl.append(x[1] + 25)   # = 0
-        cl.append(u[0] + 25)       # = 0
-        cl.append(u[1] + 25)   # = 0
+        # cl.append(x[0] + 25)       # = 0
+        # cl.append(x[1] + 25)   # = 0
+        # cl.append(u[0] + 25)       # = 0
+        # cl.append(u[1] + 25)   # = 0
+
+        cl.append(jnp.sqrt((x[:,0] + 1)**2 + (x[:,1] + 1)**2) - 0.5)
 
         # stacking of equality constraints
-        return jnp.hstack(cl) 
-    
-
+        return jnp.hstack(cl)
     
 if __name__ == "__main__":
+
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle
     
-    f = dynamics.get("L_SIMO_RD3")
-    N = 10
-    nx = 3
-    nu = 1
+    # f = dynamics.get("L_SIMO_RD3")
+    def f(s, a, Ts=0.5):
+        # s = {x, y, xd, yd, xc, xcd}; o = {x, y, xd, yd, xc, xcd}
+        A = jnp.array([
+            [1.0, 0.0, Ts,  0.0],
+            [0.0, 1.0, 0.0, Ts ],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ])
+        B = jnp.array([
+            [0.0, 0.0], 
+            [0.0, 0.0],
+            [Ts, 0.0],
+            [0.0, Ts]
+        ])
+        s_next = (s @ A.T + a @ B.T)
+        return s_next    
+    N = 20
+    nx = 4
+    nu = 2
     mpc = MPC(N=N, nx=nx, nu=nu, ny=3, f=f)
 
     x0 = jnp.zeros(nx) # parameter for initial condition
@@ -468,9 +493,9 @@ if __name__ == "__main__":
     mpc(x0)
     mpc(x1)
 
-    x_vec = jnp.stack([x0, x1])
-    mpc_vec = MPC_Vectorized(N=N, nx=nx, nu=nu, ny=3, f=f, b=len(x_vec))
-    mpc_vec(x_vec)
+    # x_vec = jnp.stack([x0, x1])
+    # mpc_vec = MPC_Vectorized(N=N, nx=nx, nu=nu, ny=3, f=f, b=len(x_vec))
+    # mpc_vec(x_vec)
 
     # eval_data = 3.0 * np.random.randn(nx) generated the below
     eval_data = jnp.array([1.59609801, 1.51405802, 4.63639117])
@@ -478,7 +503,9 @@ if __name__ == "__main__":
     Q = 10.0                # state loss
     R = 0.0001              # action loss
     u_N, x_N = [], []
-    x = eval_data
+    nb = 1
+    x = np.array([-2, -2, 0, 0.])
+    cs = np.array([[-1,-1,0.5]]*nb)
     loss = 0.0
     for _ in range(10):
         u = mpc(x)
@@ -491,5 +518,10 @@ if __name__ == "__main__":
     (R * jnp.sum(u_N**2) + Q * jnp.sum(x_N**2)) / N
     print(f'loss: {loss}')
 
+    fig, ax = plt.subplots()
+    ax.plot(x_N[:,0], x_N[:,1])
+    ax.add_patch(Circle(cs[0,:2], cs[0,2]))
+    ax.set_aspect('equal')
+    plt.show()
 
     print('fin')

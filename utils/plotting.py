@@ -5,8 +5,13 @@ from utils.geometry import project_vector, find_coefficients, pca
 from utils.jax import reconstruct_pytree    
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from matplotlib.colors import LogNorm
+from matplotlib import animation
+from datetime import datetime
+import os
+from matplotlib.patches import Circle
 
-def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, hzn):
+def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, hzn, save_name='data/combined_nn_optimization.pdf'):
     print('performing PCA analysis plotting...')
     components = pca(pol_s_hist.T)
     vec_best_pol_s, _ = jax.tree.flatten(get_params(opt_s))
@@ -53,19 +58,20 @@ def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dty
     losses_clipped = np.clip(losses, a_min=0.0, a_max = 2_000)
 
     # Create a figure with two subplots
-    fig = plt.figure(figsize=(16, 6))
-    ax1 = fig.add_subplot(121, projection='3d')
-    ax2 = fig.add_subplot(122)
+    fig = plt.figure(figsize=(25, 6))
+    ax1 = fig.add_subplot(131, projection='3d')
+    ax2 = fig.add_subplot(132)
+    ax3 = fig.add_subplot(133)
 
     # Plot the 3D surface on the first subplot
     surface = ax1.plot_surface(X, Y, np.log(losses_clipped), cmap='viridis')
     # fig.colorbar(surface, ax=ax1, shrink=0.5, aspect=10)
     ax1.set_xlabel('PC 2')
     ax1.set_ylabel('PC 1')
-    ax1.set_zlabel('Loss')
+    ax1.set_zlabel('Log Loss')
 
     # Plot the 2D contour plot on the second subplot
-    contour = ax2.contourf(X, Y, np.log(losses_clipped), cmap='viridis', levels=50)
+    contour = ax2.contourf(X, Y, np.log(losses_clipped), levels=50, cmap='viridis')
     plt.colorbar(contour, ax=ax2)
     contour_lines = ax2.contour(X, Y, np.log(losses_clipped), colors='black', linestyles='dashed', linewidths=1)
     ax2.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.1f')
@@ -74,44 +80,175 @@ def plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dty
     ax2.set_xlabel('PC 2')
     ax2.set_ylabel('PC 1')
 
+    # Plot the 2D contour plot on the second subplot
+    contour_noclip = ax3.contourf(X, Y, np.log(losses), levels=50, cmap='viridis')
+    plt.colorbar(contour_noclip, ax=ax3)
+    contour_lines_noclip = ax3.contour(X, Y, np.log(losses), colors='black', linestyles='dashed', linewidths=1)
+    ax3.clabel(contour_lines_noclip, inline=True, fontsize=8, fmt='%1.1f')
+    ax3.plot(xy[:,0], xy[:,1], 'r-', label='Optimization Trajectory')
+    ax3.legend()
+    ax3.set_xlabel('PC 2')
+    ax3.set_ylabel('PC 1')
+
     # Save the combined plot to a file
-    plt.savefig('data/combined_nn_optimization.pdf')
+    plt.savefig(save_name)
+
+    # # Create a figure with two subplots
+    # fig = plt.figure(figsize=(16, 6))
+    # ax1 = fig.add_subplot(121, projection='3d')
+    # ax2 = fig.add_subplot(122)
+
+    # # Plot the 3D surface on the first subplot
+    # surface = ax1.plot_surface(X, Y, np.log(losses_clipped), cmap='viridis')
+    # # fig.colorbar(surface, ax=ax1, shrink=0.5, aspect=10)
+    # ax1.set_xlabel('PC 2')
+    # ax1.set_ylabel('PC 1')
+    # ax1.set_zlabel('Loss')
+
+    # # Plot the 2D contour plot on the second subplot
+    # contour = ax2.contourf(X, Y, np.log(losses_clipped), cmap='viridis', levels=50)
+    # plt.colorbar(contour, ax=ax2)
+    # contour_lines = ax2.contour(X, Y, np.log(losses_clipped), colors='black', linestyles='dashed', linewidths=1)
+    # ax2.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.1f')
+    # ax2.plot(xy[:,0], xy[:,1], 'r-', label='Optimization Trajectory')
+    # ax2.legend()
+    # ax2.set_xlabel('PC 2')
+    # ax2.set_ylabel('PC 1')
+
+    # # Save the combined plot to a file
+    # plt.savefig('data/combined_nn_optimization.pdf')
 
     # Show the plot
     plt.show()
 
-    # # Create a figure and a 3D subplot
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
+class Animator:
+    def __init__(
+            self,
+            states, times, references, state_prediction = None,
+            max_frames = 500,
+            save_path = 'data/media', save_name = None,
+    ) -> None:
+        
+        self.save_path = save_path
+        self.save_name = save_name
+        num_steps = len(times)
+        max_frames = 500
+        self.num_frames = 1
+        self.ifsave = True
+        self.dt = 0.1
+        self.preds = None
 
-    # # Plot the surface
-    # surface = ax.plot_surface(X, Y, np.log(losses), cmap='viridis')
-    # # line = ax.plot(xy[:,0], xy[:,1], np.log(losses_traj), color='red')
+        def compute_render_interval(num_steps, max_frames):
+            render_interval = 1  # Start with rendering every frame.
+            # While the number of frames using the current render interval exceeds max_frames, double the render interval.
+            while num_steps / render_interval > max_frames:
+                render_interval *= 2
+            return render_interval
+        
+        render_interval = compute_render_interval(num_steps, max_frames)
 
-    # # Add a color bar which maps values to colors
-    # fig.colorbar(surface, shrink=0.5, aspect=5)
+        if state_prediction is not None:
+            self.state_prediction = state_prediction[::render_interval,:]
+        else:
+            self.state_prediction = state_prediction
 
-    # # Set labels and title
-    # ax.set_xlabel('PC 2 axis')
-    # ax.set_ylabel('PC 1 axis')
-    # ax.set_zlabel('Loss axis')
+        self.states = states[::render_interval,:]
+        self.times = times[::render_interval]
+        self.references = references[::render_interval,:]
 
-    # # Show the plot
-    # plt.savefig('data/nn_optimization_landscape.pdf')
-    # # plt.show()
+        # Unpack States for readability
+        # -----------------------------
 
-    # # Create the contour plot
-    # plt.figure(figsize=(8, 6))
-    # contour = plt.contourf(X, Y, np.log(losses), cmap='viridis', levels=50)
-    # plt.colorbar(contour)
-    # contour_lines = plt.contour(X, Y, np.log(losses), colors='black', linestyles='dashed', linewidths=1)
-    # plt.clabel(contour_lines, inline=True, fontsize=8, fmt='%1.1f')
+        self.x = self.states[:,0]
+        self.y = self.states[:,1]
+        self.xd = self.states[:,2]
+        self.xd = self.states[:,3]
 
-    # # Plot the trajectory
-    # plt.plot(xy[:,0], xy[:,1], 'r-', label='Optimization Trajectory')
-    # # plt.scatter(xy[:,0], xy[:,1], c='red')  # Optionally mark points
-    # plt.xlabel('PC 2')
-    # plt.ylabel('PC 1')
-    # plt.legend()
+        # Instantiate the figure with title, time, limits...
+        # --------------------------------------------------
 
-    # plt.savefig('data/nn_optimization_trajectory.pdf')
+        self.fig = plt.figure()
+        self.ax = self.fig.add_subplot()
+
+        self.xDes = self.references[:, 0]
+        self.yDes = self.references[:, 1]
+        extraEachSide = 0.5
+
+        x_min = min(np.min(self.x), np.min(self.xDes))
+        y_min = min(np.min(self.y), np.min(self.yDes))
+        x_max = max(np.max(self.x), np.max(self.xDes))
+        y_max = max(np.max(self.y), np.max(self.yDes))
+
+        maxRange = 0.5*np.array([x_max-x_min, y_max-y_min]).max() + extraEachSide
+        mid_x = 0.5*(x_max+x_min)
+        mid_y = 0.5*(y_max+y_min)
+        
+        self.ax.set_xlim([mid_x-maxRange, mid_x+maxRange])
+        self.ax.set_xlabel('X')
+        self.ax.set_ylim([mid_y-maxRange, mid_y+maxRange])
+        self.ax.set_ylabel('Y')
+
+        self.line1, = self.ax.plot([], [], lw=2, color='red')
+        self.ax.add_patch(Circle([1, 1], 0.5))
+
+        self.ax.scatter(self.xDes, self.yDes, color='green', alpha=1, marker = 'o', s = 25)
+
+    def draw_predictions(self, i, state_prediction):
+
+        # predicted_x is in the form of (prediction idx, state, timestep idx)
+        return self.ax.plot(state_prediction[i,0,:], state_prediction[i,1,:], color='black')
+
+    def update_lines(self, i):
+
+        # we draw this every self.num_frames
+        time = self.times[i * self.num_frames]
+
+        # to draw the history of the line so far we need to retrieve all of it
+        x_from0 = self.x[0:i * self.num_frames]
+        y_from0 = self.y[0:i * self.num_frames]
+
+        # if using predictive control, plot the predictions
+        if self.state_prediction is not None:
+
+            if self.preds is not None:
+                self.preds[0].remove()
+
+            self.preds = self.draw_predictions(i, self.state_prediction)
+
+        self.line1.set_data(x_from0, y_from0)
+
+        return self.line1
+
+    def ini_plot(self):
+
+        self.line1.set_data(np.empty([1]), np.empty([1]))
+
+        return self.line1
+    
+    def animate(self):
+        line_ani = animation.FuncAnimation(
+            self.fig, 
+            self.update_lines, 
+            init_func=self.ini_plot, 
+            # frames=len(self.times[0:-2:self.num_frames]), 
+            frames=len(self.times)-1, 
+            interval=(self.dt*10), 
+            blit=False)
+
+        if (self.ifsave):
+            if self.save_name is None:
+                current_datetime = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                print(f"save path: {os.path.abspath(self.save_path)}")
+                if not os.path.exists(self.save_path):
+                    os.makedirs(self.save_path)
+                line_ani.save(f'{self.save_path}/{current_datetime}.gif', dpi=120, fps=25)
+                # Update the figure with the last frame of animation
+                self.update_lines(len(self.times[1:])-1)
+                # Save the final frame as an SVG for good paper plots
+                self.fig.savefig(f'{self.save_path}/{current_datetime}_final_frame.svg', format='svg')
+            else:
+                line_ani.save(f'{self.save_path}/{self.save_name}.gif', dpi=120, fps=25)
+
+        # plt.close(self.fig)            
+        # plt.show()
+        return line_ani

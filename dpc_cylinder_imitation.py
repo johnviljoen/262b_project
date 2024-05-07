@@ -10,9 +10,10 @@ config.update('jax_platform_name', 'cpu')
 import functools
 import numpy as np
 import jax.numpy as jnp
-
+from tqdm import tqdm
 from utils.mlp import init_pol, pol_inf
 from utils.opt import adagrad, adam, clip_grad_norm
+from mpc_ca import MPCVariableSpaceHorizon, generate_variable_timesteps
 
 def gen_dataset(nb, cs):
     angles = np.random.normal(loc=1.25 * np.pi, scale=2, size=(nb,))
@@ -96,11 +97,36 @@ def cost(pol_s, s, cs, hzn): # mu opt: 50k ish, standard start is 1m
         s = s_next
     return loss
 
+# @functools.partial(jax.jit, static_argnums=(3,4))
+def cost_imitation(pol_s, s, cs, hzn, mpc): # mu opt: 50k ish, standard start is 1m
+    loss, Q, R, mu, b = 0, 5.0, 0.1, 1_000_000.0, s.shape[0]
+    print('generating an epoch of imitation data - typically takes 40mins... (3 mins per iteration)')
+    for _ in tqdm(range(hzn)):
+        mpc_a = []
+        for s_ in s:
+            mpc_a.append(mpc(s_[:4], np.array([[0,0,0,0]]*(hzn+1)).T)[0]) # throwing away prediction data rn - sad - but dont want to deal with off policy rl
+        mpc_a = np.vstack(mpc_a)
+        loss += jnp.sum((mpc_a - a)**2)
+        a = pol_inf(pol_s, s)
+        s_next = f(s, a, cs)
+        s = s_next
+    return loss
+
 def step(step, opt_s, s, cs, hzn, opt_update, get_params):
     pol_s = get_params(opt_s)
     # test = cost(pol_s, s, cs, hzn)
     # test2 = jax.grad(cost)(pol_s, s, cs, hzn)
     loss, grads = jax.value_and_grad(cost)(pol_s, s, cs, hzn)
+    grads = clip_grad_norm(grads, max_norm=100.0)
+    # grads = jnp.nan_to_num(grads, nan=0.0)
+    opt_s = opt_update(step, grads, opt_s)
+    return loss, opt_s, grads
+
+def step_imitation(step, opt_s, s, cs, hzn, opt_update, get_params, mpc):
+    pol_s = get_params(opt_s)
+    # test = cost(pol_s, s, cs, hzn)
+    # test2 = jax.grad(cost)(pol_s, s, cs, hzn)
+    loss, grads = jax.value_and_grad(cost_imitation)(pol_s, s, cs, hzn, mpc)
     grads = clip_grad_norm(grads, max_norm=100.0)
     # grads = jnp.nan_to_num(grads, nan=0.0)
     opt_s = opt_update(step, grads, opt_s)
@@ -113,7 +139,7 @@ if __name__ == "__main__":
     from utils.plotting import plot_training_trajectory
 
     ns, no, ncs, na = 4, 2, 3, 2            # state, cylinder observation, cylinder state, input sizes
-    hzn, nb, nmb, ne = 20, 3333, 1, 400     # horizon, batch, minibatch, epoch sizes
+    hzn, nb, nmb, ne = 20, 3333, 1, 1     # horizon, batch, minibatch, epoch sizes
     lr = 5e-3                               # learning rate
 
     layer_sizes = [ns + no, 20, 20, 20, 20, na]
@@ -144,7 +170,33 @@ if __name__ == "__main__":
     pol_s_hist = np.vstack(pol_s_hist)
     grads_hist = np.vstack(grads_hist)
 
-    # plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, hzn)
+    # plot_training_trajectory(opt_s, pol_s_hist, cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, hzn, name='data/combined_nn_optimization.pdf')
+
+    # reset adam before imitation
+    pol_s = get_params(best_opt_s)
+    opt_s = opt_init(pol_s)
+
+    print('performing imitation phase:')
+
+    dts_init = generate_variable_timesteps(Ts=0.1, Tf_hzn=0.1*hzn, N=hzn)
+    mpc = MPCVariableSpaceHorizon(N=hzn, Ts_0=0.1, Tf_hzn=0.1*hzn, dts_init=dts_init)
+
+    best_loss = jnp.inf
+    pol_s_hist_imitate = []
+    for e in range(ne):
+        loss, opt_s, grads = step_imitation(e, opt_s, train_s, train_cs, hzn, opt_update, get_params, mpc)
+        leaves, treedef = jax.tree.flatten(get_params(opt_s))
+        shapes_and_dtypes = [(leaf.shape, leaf.dtype) for leaf in leaves]
+        pol_s_hist_imitate.append(jnp.concatenate([jnp.ravel(leaf) for leaf in leaves]))
+        if loss < best_loss:
+            best_opt_s = opt_s
+            best_loss = loss
+            print('new best:')
+        print(f"epoch: {e}, loss: {loss}")
+
+    pol_s_hist_imitate = np.vstack(pol_s_hist_imitate)
+
+
 
     print('fin')
 
