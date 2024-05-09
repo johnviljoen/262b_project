@@ -1,3 +1,7 @@
+"""
+This has turned into some michelin star spaghetti
+"""
+
 import jax
 
 seed = 0
@@ -213,14 +217,14 @@ if __name__ == "__main__":
 
     best_loss = jnp.inf
 
-    mu_bar=1_000_000
+    mu_bar=25_000
     mu_bar_hist = [mu_bar]
 
     mu_alpha = 100
     nb_test = 30
     cs = np.array([[-1,-1,0.5]]*nb_test) # np.random.randn(nb, ncs)
     s = gen_dataset(nb_test, cs)
-    for i in range(10):
+    for i in range(1):
         pol_s = get_params(best_opt_s)
         opt_s = opt_init(pol_s)
         pol_s_hist = []
@@ -263,15 +267,17 @@ if __name__ == "__main__":
             print(f'mu_bar_delta: {mu_alpha * direction}')
             best_opt_s_no_violation = best_opt_s
         else:
+            if i == 0:
+                best_opt_s_no_violation = best_opt_s
             break
 
     pol_s_hist = np.vstack(pol_s_hist)
     grads_hist = np.vstack(grads_hist)
-    opt_s = get_params(best_opt_s_no_violation)
+    # opt_s = get_params(best_opt_s_no_violation)
     # plot_training_trajectory(opt_s, pol_s_hist, mpc_cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, train_im_s, hzn, save_name='data/mpc_1m_50k.pdf')
 
     s_hist, a_hist = [], []
-    pol_s = get_params(best_opt_s_no_violation)
+    pol_s = get_params(best_opt_s)
     for i, t in enumerate(range(1000)):
         a = pol_inf(pol_s, s)
         s = f(s, a, cs)
@@ -288,17 +294,17 @@ if __name__ == "__main__":
     plt.savefig('testing.pdf')
     plt.close()
 
-    mu_bar_hist = np.array(mu_bar_hist)
+    # mu_bar_hist = np.array(mu_bar_hist)
 
-    values = np.arange(-1,0,0.01)
-    # fig, ax = plt.subplots()
-    for mu_bar in mu_bar_hist:
-        plt.plot(values, log_barrier(values)*mu_bar, label=f'$\lambda$ = {mu_bar:.2f}')
-    plt.xlabel('distance to barrier')
-    plt.ylabel('barrier penalty')
-    plt.legend()
-    plt.savefig('barrier_reduction.pdf')
-    plt.close()
+    # values = np.arange(-1,0,0.01)
+    # # fig, ax = plt.subplots()
+    # for mu_bar in mu_bar_hist:
+    #     plt.plot(values, log_barrier(values)*mu_bar, label=f'$\lambda$ = {mu_bar:.2f}')
+    # plt.xlabel('distance to barrier')
+    # plt.ylabel('barrier penalty')
+    # plt.legend()
+    # plt.savefig('barrier_reduction.pdf')
+    # plt.close()
 
 
     np.savez('mpc_alone_1m.npz', s_hist=s_hist, a_hist=a_hist)
