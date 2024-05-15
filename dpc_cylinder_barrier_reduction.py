@@ -150,6 +150,16 @@ def mpc_cost_pure(pol_s, s, cs, im_s, hzn):
         s = s_next
     return loss
 
+def mpc_cost_state_only(s_hist, a_hist):
+    loss, Q, R, mu, b = 0, 5.0, 0.1, 1_000_000.0, s_hist.shape[0]
+    mu_pen = 1_000_000
+    mu_bar = 0
+    for s, a in zip(s_hist, a_hist):
+        J = R * jnp.sum(a**2) + Q * jnp.sum(s[:,:4]**2)
+        pg = barrier_cost(mu_pen, mu_bar, s, a)
+        loss += (J + pg) / b
+    return loss
+
 def barrier_cost_func(pol_s, s, cs, mu_bar):
     # DPC cost
     loss, Q, R, mu, b = 0, 5.0, 0.1, 1_000_000.0, s.shape[0]
@@ -209,7 +219,7 @@ if __name__ == "__main__":
     # nb_min = ne_min
     # train_cs_min = np.array([[-1,-1,0.5]]*nb_min) # np.random.randn(nb, ncs)
     # train_s_min = gen_dataset(nb_min, train_cs_min)
-
+    hzn = 60
     dts_init = generate_variable_timesteps(Ts=0.1, Tf_hzn=0.1*hzn, N=hzn)
     mpc = MPCVariableSpaceHorizon(N=hzn, Ts_0=0.1, Tf_hzn=0.1*hzn, dts_init=dts_init)
     # train_im_s = gen_dataset_imitation(nb, train_cs, mpc)
@@ -224,7 +234,7 @@ if __name__ == "__main__":
     nb_test = 30
     cs = np.array([[-1,-1,0.5]]*nb_test) # np.random.randn(nb, ncs)
     s = gen_dataset(nb_test, cs)
-    for i in range(1):
+    for i in range(0):
         pol_s = get_params(best_opt_s)
         opt_s = opt_init(pol_s)
         pol_s_hist = []
@@ -271,15 +281,22 @@ if __name__ == "__main__":
                 best_opt_s_no_violation = best_opt_s
             break
 
-    pol_s_hist = np.vstack(pol_s_hist)
-    grads_hist = np.vstack(grads_hist)
+    # pol_s_hist = np.vstack(pol_s_hist)
+    # grads_hist = np.vstack(grads_hist)
+
     # opt_s = get_params(best_opt_s_no_violation)
     # plot_training_trajectory(opt_s, pol_s_hist, mpc_cost, get_params, shapes_and_dtypes, treedef, train_s, train_cs, train_im_s, hzn, save_name='data/mpc_1m_50k.pdf')
 
     s_hist, a_hist = [], []
-    pol_s = get_params(best_opt_s)
-    for i, t in enumerate(range(1000)):
-        a = pol_inf(pol_s, s)
+    # pol_s = get_params(best_opt_s)
+    num = 1000
+    # num = 2
+    for i, t in tqdm(enumerate(range(num))):
+        a = []
+        for j in range(nb_test):
+            a.append(mpc(s[j,:4], np.array([[0,0,0,0]]*(hzn+1)).T)[0])
+        # a = pol_inf(pol_s, s)
+        a = np.array(a)
         s = f(s, a, cs)
         s_hist.append(s); a_hist.append(a)
     
@@ -308,8 +325,9 @@ if __name__ == "__main__":
 
 
     np.savez('mpc_alone_1m.npz', s_hist=s_hist, a_hist=a_hist)
+    print(f'mpc_cost: {mpc_cost_state_only(s_hist, a_hist)}')
 
-    print(f'mpc_cost: {mpc_cost_pure(pol_s, train_s, train_cs, train_im_s, hzn)}')
+    # print(f'mpc_cost: {mpc_cost_pure(pol_s, train_s, train_cs, train_im_s, hzn)}')
     # print(f'mpc_plus_imitation_cost: {cost(pol_s, train_s, train_cs, train_im_s, hzn)}')
 
     print('fin')

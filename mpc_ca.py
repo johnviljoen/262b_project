@@ -121,7 +121,7 @@ class MPCVariableSpaceHorizon:
         opts = {
             'ipopt.print_level':0, 
             'print_time':0,
-            'ipopt.tol': 1e-6,
+            'ipopt.tol': 1e-5,
         } # silence!
         self.opti.solver('ipopt', opts)
 
@@ -159,8 +159,8 @@ class MPCVariableSpaceHorizon:
         old_u_sol = self.u_sol[:,1:] # ignore previous solution
         u_warm_start = np.hstack([old_u_sol, old_u_sol[:,-1:]]) # stack final u solution onto the end again for next warm start
 
-        self.opti.set_initial(self.X[:,1:], x_warm_start)
-        self.opti.set_initial(self.U[:,:], u_warm_start) 
+        self.opti.set_initial(self.X[:,1:], np.zeros_like(x_warm_start))
+        self.opti.set_initial(self.U[:,:], np.zeros_like(u_warm_start)) 
 
         # define cost w.r.t reference
         self.opti.set_value(self.ref, reference)
@@ -243,8 +243,8 @@ class MPCVariableSpaceHorizon:
 
     def apply_cylinder_constraint(self, opti, dts):
 
-        self.x_pos = 1
-        self.y_pos = 1
+        self.x_pos = -1
+        self.y_pos = -1
         self.radius = 0.5
         
         # apply the constraint from 2 timesteps in the future as the quad has relative degree 2
